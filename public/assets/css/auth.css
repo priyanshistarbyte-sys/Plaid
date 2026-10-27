@@ -1,0 +1,168 @@
+/* ══════════════════════════════════════════════════════════════════
+   SB-HRM auth screens — same palette and theming contract as the app
+   shell (style.css), but self-contained: the guest layout loads only
+   this sheet. Dark is the default; [data-theme="light"] re-points the
+   same tokens.
+   ══════════════════════════════════════════════════════════════════ */
+
+:root {
+    color-scheme: dark;
+    --purple:       #6c3fc5;
+    --purple-hover: #7c52d5;
+    --purple-active:#5c34ab;
+    --accent-soft:  #a78bfa;
+    --accent-soft-hover: #c4b5fd;
+    --page-bg:      #0d0d22;
+    --card-bg:      #12122a;
+    --input-bg:     #0d0d22;
+    --text:         #e8e8f0;
+    --text-strong:  #ffffff;
+    --text-muted:   #8888aa;
+    --border:       #2e2e5a;
+    --green:        #00c853;
+    --green-bg:     #003319;
+    --green-bd:     #00552255;
+    --red:          #ff4444;
+    --red-fg:       #ff7777;
+    --glow:         rgba(108,63,197,.28);
+    --shadow:       rgba(0,0,0,.55);
+}
+
+:root[data-theme="light"] {
+    color-scheme: light;
+    --purple:       #6d28d9;
+    --purple-hover: #5b21b6;
+    --purple-active:#4c1d95;
+    --accent-soft:  #6d28d9;
+    --accent-soft-hover: #4c1d95;
+    --page-bg:      #f3f4f9;
+    --card-bg:      #ffffff;
+    --input-bg:     #ffffff;
+    --text:         #23262f;
+    --text-strong:  #0f1222;
+    --text-muted:   #6b7280;
+    --border:       #dfe2ec;
+    --green:        #15803d;
+    --green-bg:     #e7f7ed;
+    --green-bd:     #a7e3bf;
+    --red:          #dc2626;
+    --red-fg:       #b91c1c;
+    --glow:         rgba(108,63,197,.14);
+    --shadow:       rgba(15,23,42,.14);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+    font-family: "Segoe UI", system-ui, sans-serif; font-size: 13px;
+    color: var(--text);
+    background:
+        radial-gradient(1000px 500px at 50% -10%, var(--glow), transparent 70%),
+        var(--page-bg);
+}
+
+/* ── Card ── */
+.auth-container {
+    width: 100%; max-width: 400px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px 30px;
+    box-shadow: 0 24px 60px var(--shadow);
+    position: relative;
+}
+
+/* ── Theme switch (top-right of the card) ── */
+.auth-theme-toggle {
+    position: absolute; top: 12px; right: 12px;
+    background: transparent; border: 1px solid var(--border); color: var(--text-muted);
+    width: 30px; height: 30px; border-radius: 8px;
+    display: inline-flex; align-items: center; justify-content: center;
+    cursor: pointer; font-size: 13px; line-height: 1; transition: all .15s;
+}
+.auth-theme-toggle:hover { color: var(--text-strong); border-color: var(--purple); }
+.auth-theme-toggle .theme-icon-light { display: none; }
+:root[data-theme="light"] .auth-theme-toggle .theme-icon-light { display: inline-block; }
+:root[data-theme="light"] .auth-theme-toggle .theme-icon-dark { display: none; }
+
+/* ── Header ── */
+.auth-header { text-align: center; margin-bottom: 26px; }
+.auth-logo {
+    width: 54px; height: 54px; margin: 0 auto 14px;
+    background: linear-gradient(135deg, var(--purple), var(--accent-soft));
+    border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 18px; font-weight: 700; letter-spacing: 1px;
+}
+.auth-title { font-size: 1.25rem; font-weight: 700; color: var(--text-strong); letter-spacing: .5px; }
+.auth-subtitle { color: var(--text-muted); font-size: 12px; margin-top: 4px; }
+
+/* ── Fields ── */
+.form-group { margin-bottom: 16px; }
+.form-label {
+    display: block; margin-bottom: 6px;
+    color: var(--text-muted); font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .5px;
+}
+.form-input {
+    width: 100%;
+    background: var(--input-bg); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 10px 12px; font-size: 13px;
+    transition: border-color .15s, box-shadow .15s;
+}
+.form-input::placeholder { color: var(--text-muted); }
+.form-input:focus {
+    outline: none;
+    border-color: var(--purple);
+    box-shadow: 0 0 0 3px rgba(108,63,197,.2);
+}
+.form-input.error { border-color: var(--red); }
+
+.error-message { color: var(--red-fg); font-size: 11px; margin-top: 5px; display: block; }
+.success-message {
+    background: var(--green-bg); border: 1px solid var(--green-bd); color: var(--green);
+    padding: 10px 14px; border-radius: 8px; font-size: 12px; margin-bottom: 16px;
+}
+
+/* ── Remember me ── */
+.checkbox-group { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; }
+.checkbox-input {
+    width: 15px; height: 15px; accent-color: var(--purple);
+    background: var(--input-bg); cursor: pointer;
+}
+.checkbox-label { color: var(--text-muted); font-size: 12px; cursor: pointer; }
+
+/* ── Submit ── */
+.btn-primary {
+    width: 100%;
+    background: var(--purple); border: none; color: #fff;
+    padding: 11px 20px; border-radius: 6px;
+    font-size: 13px; font-weight: 600; letter-spacing: .4px;
+    cursor: pointer; transition: background .2s;
+}
+.btn-primary:hover { background: var(--purple-hover); }
+.btn-primary:active { background: var(--purple-active); }
+
+/* ── Footer links ── */
+.auth-links { margin-top: 18px; text-align: center; }
+.auth-link { color: var(--accent-soft); font-size: 12px; text-decoration: none; }
+.auth-link:hover { color: var(--accent-soft-hover); text-decoration: underline; }
+.forgot-password-text { color: var(--text-muted); font-size: 12px; margin-bottom: 18px; line-height: 1.6; }
+
+.divider { position: relative; text-align: center; margin: 18px 0; }
+.divider::before {
+    content: ""; position: absolute; top: 50%; left: 0; right: 0;
+    border-top: 1px solid var(--border);
+}
+.divider span {
+    position: relative; background: var(--card-bg); padding: 0 10px;
+    color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--page-bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--purple); }
