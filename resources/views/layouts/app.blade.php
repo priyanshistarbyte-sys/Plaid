@@ -50,6 +50,12 @@
                     <a href="{{ route('plaid.index') }}" class="nav-btn {{ request()->routeIs('plaid.*') ? 'active' : '' }}">
                         <i class="bi bi-receipt"></i> Transactions
                     </a>
+                    <a href="{{ route('banks.index') }}" class="nav-btn {{ request()->routeIs('banks.*') ? 'active' : '' }}">
+                        <i class="bi bi-bank"></i> Bank Accounts
+                    </a>
+                    <a href="{{ route('types.index') }}" class="nav-btn {{ request()->routeIs('types.*') ? 'active' : '' }}">
+                        <i class="bi bi-tags"></i> Types
+                    </a>
                     <a href="{{ route('settings.edit') }}" class="nav-btn {{ request()->routeIs('settings.*') ? 'active' : '' }}">
                         <i class="bi bi-gear"></i> Settings
                     </a>

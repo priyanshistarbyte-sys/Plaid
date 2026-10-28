@@ -7,13 +7,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class PlaidTransaction extends Model
 {
-    public const TYPES = ['expense', 'revenue', 'transaction'];
-
     protected $fillable = [
         'plaid_item_id',
         'transaction_id',
         'pending_transaction_id',
-        'type',
+        'transaction_type_id',
         'account_id',
         'name',
         'amount',
@@ -36,5 +34,15 @@ class PlaidTransaction extends Model
     public function item(): BelongsTo
     {
         return $this->belongsTo(PlaidItem::class, 'plaid_item_id');
+    }
+
+    public function transactionType(): BelongsTo
+    {
+        return $this->belongsTo(TransactionType::class);
+    }
+
+    public function account(): BelongsTo
+    {
+        return $this->belongsTo(PlaidAccount::class, 'account_id', 'account_id');
     }
 }

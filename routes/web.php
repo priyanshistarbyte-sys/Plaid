@@ -1,9 +1,11 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\BankAccountController;
 use App\Http\Controllers\PinLoginController;
 use App\Http\Controllers\PlaidController;
 use App\Http\Controllers\SettingController;
+use App\Http\Controllers\TransactionTypeController;
 use App\Http\Middleware\EnsurePlaidConfigured;
 
 Route::get('/', function () {
@@ -18,6 +20,8 @@ Route::middleware('guest')->group(function () {
 Route::post('/logout', [PinLoginController::class, 'logout'])->middleware('auth')->name('logout');
 
 Route::middleware('auth')->group(function () {
+    Route::get('/banks', [BankAccountController::class, 'index'])->name('banks.index');
+    Route::resource('types', TransactionTypeController::class)->only(['index', 'store', 'update', 'destroy']);
     Route::get('/settings', [SettingController::class, 'edit'])->name('settings.edit');
     Route::put('/settings', [SettingController::class, 'update'])->name('settings.update');
 });

@@ -1,6 +1,6 @@
 @extends('layouts.app')
 @section('page-title', 'Bank Transactions')
-@section('page-subtitle', 'Connected accounts via Plaid · classify each transaction as Expense, Revenue or Transaction')
+@section('page-subtitle', 'Connected accounts via Plaid · classify each transaction with a type')
 
 @section('page-actions')
     <button type="button" class="btn btn-outline-primary" id="sync" @disabled(!$configured)>
@@ -17,10 +17,24 @@
     .type-btn { color: var(--accent-soft); font-size: 15px; }
     .tx-name { color: var(--text-strong); font-weight: 600; }
     .tx-sub { color: var(--text-muted); font-size: 11px; }
+    .tx-bank { color: var(--text-strong); white-space: nowrap; }
     .type-detail { display: grid; grid-template-columns: 130px 1fr; gap: 8px 16px; margin: 0 0 18px; }
     .type-detail dt { color: var(--text-muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
     .type-detail dd { margin: 0; word-break: break-all; color: var(--text-strong); }
     .type-options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .type-label-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+    .type-label-row .form-label { margin: 0; }
+    .quick-add { display: none; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+    .quick-add.open { display: flex; }
+    .quick-add input { flex: 1 1 200px; }
+    .quick-add select { flex: 0 0 130px; }
+    /* KPI value colour follows the type's badge colour */
+    .kpi-value.t-danger { color: var(--red); }
+    .kpi-value.t-success { color: var(--green); }
+    .kpi-value.t-info { color: var(--info); }
+    .kpi-value.t-primary { color: var(--accent-soft); }
+    .kpi-value.t-warning { color: var(--warn-fg); }
+    .kpi-value.t-secondary { color: var(--text-muted); }
     .type-option {
         border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
         display: flex; align-items: center; gap: 8px; cursor: pointer; margin: 0; transition: border-color .15s;
@@ -41,38 +55,17 @@
         </div>
     @endunless
 
-    <div class="kpi-row">
-        <div class="kpi-card">
-            <div class="kpi-label">Transactions</div>
-            <div class="kpi-value white" id="kpiCount">0</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-label">Expense</div>
-            <div class="kpi-value red" id="kpiExpense">0.00</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-label">Revenue</div>
-            <div class="kpi-value green" id="kpiRevenue">0.00</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-label">Transaction</div>
-            <div class="kpi-value purple" id="kpiTransaction">0.00</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-label">Not classified</div>
-            <div class="kpi-value gold" id="kpiUntyped">0</div>
-        </div>
-    </div>
+    {{-- Filled by renderKpis(): Transactions, one card per type, Not classified --}}
+    <div class="kpi-row" id="kpis"></div>
 
     <div class="card">
         <div class="card-header d-flex align-items-center gap-2 flex-wrap">
             <h5 class="mb-0 me-auto">Transaction List</h5>
+            <select class="form-select form-select-sm w-auto" id="accountFilter" aria-label="Filter by account">
+                <option value="">All accounts</option>
+            </select>
             <select class="form-select form-select-sm w-auto" id="typeFilter" aria-label="Filter by type">
                 <option value="">All types</option>
-                <option value="expense">Expense</option>
-                <option value="revenue">Revenue</option>
-                <option value="transaction">Transaction</option>
-                <option value="none">Not classified</option>
             </select>
         </div>
         <div class="card-body">
@@ -80,16 +73,17 @@
                 <table class="table table-striped table-hover compact mb-0">
                     <thead>
                         <tr>
-                            <th width="11%">Date</th>
+                            <th width="9%">Date</th>
                             <th>Name</th>
-                            <th width="16%">Category</th>
-                            <th width="9%">Status</th>
-                            <th width="13%" class="text-end">Amount</th>
-                            <th width="14%">Type</th>
+                            <th width="18%">Bank / Account</th>
+                            <th width="14%">Category</th>
+                            <th width="8%">Status</th>
+                            <th width="11%" class="text-end">Amount</th>
+                            <th width="12%">Type</th>
                         </tr>
                     </thead>
                     <tbody id="rows">
-                        <tr><td colspan="6" class="text-center text-muted py-4">Loading…</td></tr>
+                        <tr><td colspan="7" class="text-center text-muted py-4">Loading…</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -107,20 +101,25 @@
             <div class="modal-body">
                 <dl class="type-detail" id="details"></dl>
 
-                <label class="form-label">Type</label>
-                <div class="type-options">
-                    <label class="type-option">
-                        <input class="form-check-input" type="radio" name="type" value="expense" required>
-                        <span class="badge bg-danger">Expense</span>
-                    </label>
-                    <label class="type-option">
-                        <input class="form-check-input" type="radio" name="type" value="revenue">
-                        <span class="badge bg-success">Revenue</span>
-                    </label>
-                    <label class="type-option">
-                        <input class="form-check-input" type="radio" name="type" value="transaction">
-                        <span class="badge bg-info">Transaction</span>
-                    </label>
+                <div class="type-label-row">
+                    <label class="form-label">Type</label>
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="quickAddToggle">
+                        <i class="bi bi-plus-lg me-1"></i> New type
+                    </button>
+                </div>
+                <div class="type-options" id="typeOptions"></div>
+
+                <div class="quick-add" id="quickAdd">
+                    <input type="text" class="form-control" id="quickName" maxlength="40" placeholder="New type name, e.g. Salary">
+                    <select class="form-select" id="quickColor" aria-label="Color">
+                        @foreach ($colors as $value => $label)
+                            <option value="{{ $value }}" @selected($value === 'primary')>{{ $label }}</option>
+                        @endforeach
+                    </select>
+                    <button type="button" class="btn btn-primary" id="quickAddSave"><i class="bi bi-check2 me-1"></i> Add</button>
+                </div>
+                <div class="form-text text-muted mt-2">
+                    Manage all types on the <a href="{{ route('types.index') }}">Types</a> page.
                 </div>
             </div>
             <div class="modal-footer">
@@ -133,126 +132,115 @@
 @endsection
 
 @push('scripts')
-<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+@include('partials.plaid-client')
 <script>
-    const base = @json(url('/plaid'));
-    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const { api, esc, money } = PlaidApp;
 
-    async function api(path, method = 'GET', body = null) {
-        const res = await fetch(base + path, {
-            method,
-            headers: {
-                'Accept': 'application/json',
-                'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': csrf,
-            },
-            body: body ? JSON.stringify(body) : null,
-        });
-        // Session ended (e.g. logged out in another tab): back to the PIN screen.
-        if (res.status === 401 || res.status === 419) {
-            window.location.href = @json(route('login'));
-            throw new Error('Session expired');
-        }
-        const json = await res.json();
-        if (json.not_configured) {
-            // Settings were cleared since this page loaded: point the user there.
-            throw new Error(`${json.message} <a href="${@json(route('settings.edit'))}">Open Settings</a>`);
-        }
-        if (!res.ok) throw new Error(json.error || json.message || res.statusText);
-        return json;
+    // Types from the Types page; the popup's quick add appends to this list.
+    let types = @json($types);
+    const typeBadge = (name, color) => name ? `<span class="badge bg-${esc(color)}">${esc(name)}</span>` : '';
+
+    function renderTypeControls() {
+        const typeFilter = document.getElementById('typeFilter');
+        const current = typeFilter.value;
+        typeFilter.innerHTML = '<option value="">All types</option>'
+            + types.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')
+            + '<option value="none">Not classified</option>';
+        typeFilter.value = [...typeFilter.options].some(o => o.value === current) ? current : '';
+
+        document.getElementById('typeOptions').innerHTML = types.length
+            ? types.map(t => `
+                <label class="type-option">
+                    <input class="form-check-input" type="radio" name="type" value="${t.id}" required>
+                    ${typeBadge(t.name, t.color)}
+                </label>`).join('')
+            : '<div class="text-muted">No types yet — add one with "New type".</div>';
     }
 
-    const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    const money = (n) => Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const typeBadges = {
-        expense: '<span class="badge bg-danger">Expense</span>',
-        revenue: '<span class="badge bg-success">Revenue</span>',
-        transaction: '<span class="badge bg-info">Transaction</span>',
-    };
+    // Plaid only ever shares the last few digits of an account number (the "mask").
+    const maskedNumber = (t) => t.account_mask ? `•••• ${t.account_mask}` : '';
+    const accountLabel = (t) => t.account_name
+        ? [t.account_name, maskedNumber(t)].filter(Boolean).join(' · ')
+        : 'Account details on next sync';
 
     let transactions = [];
     let selected = null;
 
+    const accountFilter = document.getElementById('accountFilter');
+    // Opened from the Bank Accounts page with ?account=… preselects that account.
+    let wantedAccount = new URLSearchParams(window.location.search).get('account') || '';
+
+    // Transactions in the selected account (all of them when none is selected).
+    const inAccount = () => transactions.filter(t => !accountFilter.value || t.account_id === accountFilter.value);
+
+    function renderAccountOptions() {
+        const accounts = new Map();
+        transactions.forEach(t => accounts.set(t.account_id, `${t.bank_name ?? 'Bank'} — ${accountLabel(t)}`));
+
+        const current = wantedAccount || accountFilter.value;
+        accountFilter.innerHTML = '<option value="">All accounts</option>' + [...accounts]
+            .sort((a, b) => a[1].localeCompare(b[1]))
+            .map(([id, label]) => `<option value="${esc(id)}">${esc(label)}</option>`).join('');
+        accountFilter.value = accounts.has(current) ? current : '';
+        wantedAccount = '';
+    }
+
     function renderKpis() {
-        const sum = (type) => transactions.filter(t => t.type === type).reduce((s, t) => s + Math.abs(Number(t.amount)), 0);
-        document.getElementById('kpiCount').textContent = transactions.length;
-        document.getElementById('kpiExpense').textContent = money(sum('expense'));
-        document.getElementById('kpiRevenue').textContent = money(sum('revenue'));
-        document.getElementById('kpiTransaction').textContent = money(sum('transaction'));
-        document.getElementById('kpiUntyped').textContent = transactions.filter(t => !t.type).length;
+        const list = inAccount();
+        const sum = (typeId) => list.filter(t => t.transaction_type_id === typeId)
+            .reduce((s, t) => s + Math.abs(Number(t.amount)), 0);
+        const card = (label, value, cls) =>
+            `<div class="kpi-card"><div class="kpi-label">${esc(label)}</div><div class="kpi-value ${cls}">${value}</div></div>`;
+
+        document.getElementById('kpis').innerHTML =
+            card('Transactions', list.length, 'white')
+            + types.map(t => card(t.name, money(sum(t.id)), 't-' + esc(t.color))).join('')
+            + card('Not classified', list.filter(t => !t.transaction_type_id).length, 'gold');
     }
 
     function renderRows() {
         const filter = document.getElementById('typeFilter').value;
         const rows = transactions
             .map((t, i) => ({ t, i }))
-            .filter(({ t }) => !filter || (filter === 'none' ? !t.type : t.type === filter));
+            .filter(({ t }) => !accountFilter.value || t.account_id === accountFilter.value)
+            .filter(({ t }) => !filter || (filter === 'none' ? !t.transaction_type_id : t.transaction_type_id === Number(filter)));
 
         document.getElementById('rows').innerHTML = rows.length ? rows.map(({ t, i }) => `
             <tr>
-                <td>${esc(t.transaction_date)}</td>
+                <td class="text-nowrap">${esc(t.transaction_date)}</td>
                 <td>
                     <div class="tx-name">${esc(t.merchant_name ?? t.name)}</div>
                     ${t.merchant_name && t.merchant_name !== t.name ? `<div class="tx-sub">${esc(t.name)}</div>` : ''}
+                </td>
+                <td>
+                    <div class="tx-bank"><i class="bi bi-bank2 me-1"></i>${esc(t.bank_name) || '—'}</div>
+                    <div class="tx-sub">${esc(accountLabel(t))}</div>
                 </td>
                 <td>${t.category ? `<span class="tag-soft">${esc(t.category.replace(/_/g, ' '))}</span>` : ''}</td>
                 <td>${t.pending ? '<span class="badge bg-warning">Pending</span>' : '<span class="badge bg-secondary">Posted</span>'}</td>
                 {{-- Plaid amounts: positive = money out, negative = money in --}}
                 <td class="text-end fw-semibold ${Number(t.amount) < 0 ? 'c-green' : ''}">${money(t.amount)} ${esc(t.iso_currency_code)}</td>
                 <td class="type-cell">
-                    ${typeBadges[t.type] ?? ''}
+                    ${typeBadge(t.type_name, t.type_color)}
                     <button type="button" class="icon-btn type-btn" data-index="${i}"
-                            title="${t.type ? 'Change type' : 'Set type'}" aria-label="Set type">
-                        <i class="bi ${t.type ? 'bi-pencil-square' : 'bi-plus-circle'}"></i>
+                            title="${t.transaction_type_id ? 'Change type' : 'Set type'}" aria-label="Set type">
+                        <i class="bi ${t.transaction_type_id ? 'bi-pencil-square' : 'bi-plus-circle'}"></i>
                     </button>
                 </td>
             </tr>`).join('')
-            : `<tr><td colspan="6" class="text-center text-muted py-4">${transactions.length ? 'No transactions match this filter.' : 'No transactions yet — connect a bank to get started.'}</td></tr>`;
+            : `<tr><td colspan="7" class="text-center text-muted py-4">${transactions.length ? 'No transactions match this filter.' : 'No transactions yet — connect a bank to get started.'}</td></tr>`;
     }
 
     async function loadTransactions() {
         transactions = await api('/transactions');
+        renderAccountOptions();
         renderKpis();
         renderRows();
     }
 
-    async function sync() {
-        const btn = document.getElementById('sync');
-        btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Syncing…';
-        try {
-            const r = await api('/sync', 'POST');
-            await loadTransactions();
-            toastr.success(`${r.added} added, ${r.modified} modified, ${r.removed} removed.`, 'Sync complete');
-        } finally {
-            btn.disabled = false;
-            btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i> Sync';
-        }
-    }
-
-    document.getElementById('connect').addEventListener('click', async () => {
-        try {
-            const { link_token } = await api('/link-token', 'POST');
-
-            Plaid.create({
-                token: link_token,
-                onSuccess: async (public_token, metadata) => {
-                    try {
-                        await api('/exchange-token', 'POST', {
-                            public_token,
-                            institution_name: metadata.institution?.name,
-                        });
-                        toastr.success(metadata.institution?.name ?? 'Bank', 'Connected');
-                        await sync();
-                    } catch (e) { toastr.error(e.message); }
-                },
-                onExit: (err) => { if (err) toastr.error(err.display_message || err.error_message, 'Plaid'); },
-            }).open();
-        } catch (e) { toastr.error(e.message); }
-    });
-
-    document.getElementById('sync').addEventListener('click', () => sync().catch(e => toastr.error(e.message)));
+    PlaidApp.bindButtons(loadTransactions);
     document.getElementById('typeFilter').addEventListener('change', renderRows);
+    accountFilter.addEventListener('change', () => { renderKpis(); renderRows(); });
 
     const modal = new bootstrap.Modal(document.getElementById('typeModal'));
     const form = document.getElementById('typeForm');
@@ -263,6 +251,10 @@
 
         selected = transactions[btn.dataset.index];
         const fields = {
+            'Bank': selected.bank_name,
+            'Account': selected.account_official_name || selected.account_name,
+            'Account number': maskedNumber(selected),
+            'Account type': selected.account_subtype,
             'Transaction ID': selected.transaction_id,
             'Account ID': selected.account_id,
             'Date': selected.transaction_date,
@@ -276,8 +268,50 @@
             .map(([k, v]) => `<dt>${k}</dt><dd>${esc(v) || '—'}</dd>`).join('');
 
         form.reset();
-        if (selected.type) form.elements.type.value = selected.type;
+        const current = form.querySelector(`input[name="type"][value="${selected.transaction_type_id}"]`);
+        if (current) current.checked = true;
+        quickAdd.classList.remove('open');
         modal.show();
+    });
+
+    // Quick add: create a type without leaving the popup, then select it.
+    const quickAdd = document.getElementById('quickAdd');
+    const quickName = document.getElementById('quickName');
+
+    document.getElementById('quickAddToggle').addEventListener('click', () => {
+        quickAdd.classList.toggle('open');
+        if (quickAdd.classList.contains('open')) quickName.focus();
+    });
+
+    async function createType() {
+        const name = quickName.value.trim();
+        if (!name) { quickName.focus(); return; }
+
+        const btn = document.getElementById('quickAddSave');
+        btn.disabled = true;
+        try {
+            const type = await api(@json(route('types.store')), 'POST', {
+                name,
+                color: document.getElementById('quickColor').value,
+            });
+            types = [...types, type].sort((a, b) => a.name.localeCompare(b.name));
+            renderTypeControls();
+            renderKpis();
+            form.querySelector(`input[name="type"][value="${type.id}"]`).checked = true;
+            quickName.value = '';
+            quickAdd.classList.remove('open');
+            toastr.success(`Type "${type.name}" created — click Save to apply it.`);
+        } catch (err) {
+            toastr.error(err.message);
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    document.getElementById('quickAddSave').addEventListener('click', createType);
+    // Enter in the name box adds the type instead of submitting the popup.
+    quickName.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); createType(); }
     });
 
     form.addEventListener('submit', async (e) => {
@@ -287,7 +321,7 @@
         try {
             await api(`/transactions/${encodeURIComponent(selected.transaction_id)}/type`, 'PATCH', {
                 account_id: selected.account_id,
-                type: form.elements.type.value,
+                transaction_type_id: Number(form.elements.type.value),
             });
             modal.hide();
             await loadTransactions();
@@ -299,6 +333,7 @@
         }
     });
 
+    renderTypeControls();
     loadTransactions().catch(e => toastr.error(e.message));
 </script>
 @endpush

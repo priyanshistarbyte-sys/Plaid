@@ -14,6 +14,7 @@ class PlaidItem extends Model
         'access_token',
         'cursor',
         'institution_name',
+        'last_synced_at',
     ];
 
     protected $hidden = ['access_token'];
@@ -22,6 +23,7 @@ class PlaidItem extends Model
     {
         return [
             'access_token' => 'encrypted',
+            'last_synced_at' => 'datetime',
         ];
     }
 
@@ -33,5 +35,10 @@ class PlaidItem extends Model
     public function transactions(): HasMany
     {
         return $this->hasMany(PlaidTransaction::class);
+    }
+
+    public function accounts(): HasMany
+    {
+        return $this->hasMany(PlaidAccount::class);
     }
 }

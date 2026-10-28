@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\PlaidAccount;
 use App\Models\PlaidItem;
 use App\Models\PlaidTransaction;
+use App\Models\TransactionType;
 use App\Models\User;
 use App\Services\PlaidService;
 use Illuminate\Http\Request;
@@ -15,7 +17,11 @@ class PlaidController extends Controller
 {
     public function index(PlaidService $plaid): View
     {
-        return view('plaid', ['configured' => $plaid->isConfigured()]);
+        return view('plaid', [
+            'configured' => $plaid->isConfigured(),
+            'types' => TransactionType::orderBy('name')->get(['id', 'name', 'color']),
+            'colors' => TransactionType::COLORS,
+        ]);
     }
 
     public function createLinkToken(
@@ -96,6 +102,8 @@ class PlaidController extends Controller
 
         try {
             foreach (PlaidItem::where('user_id', $user->id)->get() as $item) {
+                $this->syncAccounts($plaid, $item);
+
                 $cursor = $item->cursor;
 
                 // Page through /transactions/sync until Plaid reports no more updates.
@@ -108,8 +116,8 @@ class PlaidController extends Controller
                     $result = $plaid->post('/transactions/sync', $payload);
 
                     foreach (array_merge($result['added'], $result['modified']) as $tx) {
-                        // Matched on transaction_id + account_id; 'type' is never in this
-                        // update list, so a re-sync keeps the user's choice.
+                        // Matched on transaction_id + account_id; transaction_type_id is never
+                        // in this update list, so a re-sync keeps the user's choice.
                         $saved = PlaidTransaction::updateOrCreate(
                             [
                                 'transaction_id' => $tx['transaction_id'],
@@ -130,13 +138,13 @@ class PlaidController extends Controller
 
                         // When a pending transaction posts, Plaid gives it a new transaction_id.
                         // Carry over the type the user chose on the pending one.
-                        if ($saved->type === null && $saved->pending_transaction_id) {
-                            $type = PlaidTransaction::where('transaction_id', $saved->pending_transaction_id)
+                        if ($saved->transaction_type_id === null && $saved->pending_transaction_id) {
+                            $typeId = PlaidTransaction::where('transaction_id', $saved->pending_transaction_id)
                                 ->where('account_id', $saved->account_id)
-                                ->value('type');
+                                ->value('transaction_type_id');
 
-                            if ($type) {
-                                $saved->update(['type' => $type]);
+                            if ($typeId) {
+                                $saved->update(['transaction_type_id' => $typeId]);
                             }
                         }
                     }
@@ -152,7 +160,7 @@ class PlaidController extends Controller
                     $cursor = $result['next_cursor'];
                 } while ($result['has_more']);
 
-                $item->update(['cursor' => $cursor]);
+                $item->update(['cursor' => $cursor, 'last_synced_at' => now()]);
             }
 
             return response()->json(compact('added', 'modified', 'removed'));
@@ -166,16 +174,66 @@ class PlaidController extends Controller
         }
     }
 
+    /**
+     * Store the bank name and the item's accounts (name, last digits, type),
+     * so each transaction can show which bank account it belongs to.
+     */
+    private function syncAccounts(PlaidService $plaid, PlaidItem $item): void
+    {
+        if (blank($item->institution_name)) {
+            $institutionId = $plaid->post('/item/get', [
+                'access_token' => $item->access_token,
+            ])['item']['institution_id'] ?? null;
+
+            if ($institutionId) {
+                $institution = $plaid->post('/institutions/get_by_id', [
+                    'institution_id' => $institutionId,
+                    'country_codes' => ['US'],
+                ])['institution'];
+
+                $item->update(['institution_name' => $institution['name']]);
+            }
+        }
+
+        $accounts = $plaid->post('/accounts/get', [
+            'access_token' => $item->access_token,
+        ])['accounts'];
+
+        foreach ($accounts as $account) {
+            PlaidAccount::updateOrCreate(
+                ['account_id' => $account['account_id']],
+                [
+                    'plaid_item_id' => $item->id,
+                    'name' => $account['name'],
+                    'official_name' => $account['official_name'] ?? null,
+                    'mask' => $account['mask'] ?? null,
+                    'type' => $account['type'] ?? null,
+                    'subtype' => $account['subtype'] ?? null,
+                    'balance_current' => $account['balances']['current'] ?? null,
+                    'balance_available' => $account['balances']['available'] ?? null,
+                    'iso_currency_code' => $account['balances']['iso_currency_code'] ?? null,
+                ]
+            );
+        }
+    }
+
     public function transactions(Request $request): JsonResponse
     {
         $user = $this->currentUser($request);
 
-        $transactions = PlaidTransaction::whereHas(
-            'item',
-            fn ($q) => $q->where('user_id', $user->id)
-        )
+        $transactions = PlaidTransaction::with(['item', 'account', 'transactionType'])
+            ->whereHas('item', fn ($q) => $q->where('user_id', $user->id))
             ->orderByDesc('transaction_date')
-            ->get();
+            ->get()
+            ->map(fn (PlaidTransaction $t) => $t->withoutRelations()->toArray() + [
+                'type_name' => $t->transactionType?->name,
+                'type_color' => $t->transactionType?->color,
+                'bank_name' => $t->item?->institution_name,
+                'account_name' => $t->account?->name,
+                'account_official_name' => $t->account?->official_name,
+                'account_mask' => $t->account?->mask,
+                'account_subtype' => $t->account?->subtype,
+            ]);
 
         return response()->json($transactions);
     }
@@ -184,7 +242,9 @@ class PlaidController extends Controller
     {
         $data = $request->validate([
             'account_id' => ['required', 'string'],
-            'type' => ['required', 'in:' . implode(',', PlaidTransaction::TYPES)],
+            'transaction_type_id' => ['required', 'integer', 'exists:transaction_types,id'],
+        ], [
+            'transaction_type_id.exists' => 'That type no longer exists. Reload the page and pick another.',
         ]);
 
         $user = $this->currentUser($request);
@@ -194,7 +254,7 @@ class PlaidController extends Controller
             ->whereHas('item', fn ($q) => $q->where('user_id', $user->id))
             ->firstOrFail();
 
-        $transaction->update(['type' => $data['type']]);
+        $transaction->update(['transaction_type_id' => $data['transaction_type_id']]);
 
         return response()->json($transaction);
     }
