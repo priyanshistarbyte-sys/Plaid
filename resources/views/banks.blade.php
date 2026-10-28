@@ -29,6 +29,18 @@
     .show-empty .acct-empty { display: table-row; }
     .show-empty .acct-empty td { opacity: .7; }
     .show-empty .only-active-note { display: none; }
+    /* Rows outside the current page (wins over .show-empty .acct-empty). */
+    .account-row.off-page { display: none !important; }
+    .sort-headers th[data-sort] { cursor: pointer; user-select: none; white-space: nowrap; }
+    .sort-headers th[data-sort]:hover { color: var(--text-strong); }
+    .sort-headers th.sorted { color: var(--accent-soft); }
+    .sort-headers .sort-icon { font-size: 10px; margin-left: 4px; opacity: .45; }
+    .sort-headers th.sorted .sort-icon { opacity: 1; }
+    .table-footer {
+        display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+        margin-top: 14px; color: var(--text-muted); font-size: 12px;
+    }
+    .pagination { flex-wrap: wrap; }
     .accounts-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; color: var(--text-muted); font-size: 12px; }
 </style>
 @endpush
@@ -106,15 +118,16 @@
                     </div>
                 @else
                     <div class="table-container">
-                        <table class="table table-striped table-hover compact mb-0">
+                        <table class="table table-striped table-hover compact mb-0 account-table">
                             <thead>
-                                <tr>
-                                    <th>Account</th>
-                                    <th width="14%">Account number</th>
-                                    <th width="12%">Type</th>
-                                    <th width="14%" class="text-end">Current balance</th>
-                                    <th width="14%" class="text-end">Available</th>
-                                    <th width="10%" class="text-end">Transactions</th>
+                                {{-- Click a header to sort; click again to flip ascending / descending --}}
+                                <tr class="sort-headers">
+                                    <th data-sort="name">Account</th>
+                                    <th width="14%" data-sort="mask">Account number</th>
+                                    <th width="12%" data-sort="type">Type</th>
+                                    <th width="14%" class="text-end" data-sort="current" data-numeric>Current balance</th>
+                                    <th width="14%" class="text-end" data-sort="available" data-numeric>Available</th>
+                                    <th width="10%" class="text-end" data-sort="transactions" data-numeric>Transactions</th>
                                     <th width="6%"></th>
                                 </tr>
                             </thead>
@@ -127,7 +140,13 @@
                                     </tr>
                                 @endif
                                 @foreach ($bank->accounts as $account)
-                                    <tr class="{{ $account->transactions_count === 0 ? 'acct-empty' : '' }}">
+                                    <tr class="account-row {{ $account->transactions_count === 0 ? 'acct-empty' : '' }}"
+                                        data-name="{{ Str::lower($account->name) }}"
+                                        data-mask="{{ $account->mask }}"
+                                        data-type="{{ Str::lower($account->subtype ?? $account->type) }}"
+                                        data-current="{{ $account->balance_current }}"
+                                        data-available="{{ $account->balance_available }}"
+                                        data-transactions="{{ $account->transactions_count }}">
                                         <td>
                                             <div class="acct-name">{{ $account->name }}</div>
                                             @if ($account->official_name && $account->official_name !== $account->name)
@@ -157,6 +176,22 @@
                                 @endforeach
                             </tbody>
                         </table>
+                    </div>
+
+                    <div class="table-footer">
+                        <div class="d-flex align-items-center gap-2">
+                            <span>Show</span>
+                            <select class="form-select form-select-sm w-auto page-size" aria-label="Rows per page">
+                                <option value="5">5</option>
+                                <option value="10" selected>10</option>
+                                <option value="25">25</option>
+                                <option value="50">50</option>
+                            </select>
+                            <span class="page-info"></span>
+                        </div>
+                        <nav aria-label="Account pages for {{ $bank->institution_name }}">
+                            <ul class="pagination pagination-sm pager"></ul>
+                        </nav>
                     </div>
                 @endif
             </div>
@@ -189,20 +224,127 @@
     // (with a short pause so the "Sync complete" toast can be read first).
     PlaidApp.bindButtons(() => { setTimeout(() => window.location.reload(), 1500); });
 
+    const bankList = document.getElementById('bankList');
+    const showingEmpty = () => bankList.classList.contains('show-empty');
+
+    // ── Sorting & paging, one per bank's account table ──
+    // Default: most transactions first (the server's order). Empty values go last
+    // whichever way you sort; ties fall back to the account name A→Z.
+    const PAGE_SIZE_KEY = 'plaid-banks-page-size';
+
+    function setupAccountTable(table) {
+        const body = table.closest('.card-body');
+        const tbody = table.tBodies[0];
+        const pageSize = body.querySelector('.page-size');
+        const state = { key: 'transactions', dir: 'desc', numeric: true, page: 1 };
+
+        try {
+            const saved = localStorage.getItem(PAGE_SIZE_KEY);
+            if (saved && [...pageSize.options].some(o => o.value === saved)) pageSize.value = saved;
+        } catch (e) { /* private mode */ }
+
+        function compare(a, b) {
+            const raw = (row) => row.dataset[state.key] ?? '';
+            const va = raw(a), vb = raw(b);
+            if ((va === '') !== (vb === '')) return va === '' ? 1 : -1;
+
+            const diff = state.numeric ? Number(va) - Number(vb) : va.localeCompare(vb);
+            return (state.dir === 'asc' ? diff : -diff) || a.dataset.name.localeCompare(b.dataset.name);
+        }
+
+        function render() {
+            const rows = [...tbody.querySelectorAll('tr.account-row')].sort(compare);
+            rows.forEach(row => tbody.appendChild(row));
+
+            // Only rows the "show accounts with no transactions" switch lets through are paged.
+            const visible = rows.filter(row => showingEmpty() || !row.classList.contains('acct-empty'));
+            const size = Number(pageSize.value);
+            const pageCount = Math.max(1, Math.ceil(visible.length / size));
+            state.page = Math.min(Math.max(state.page, 1), pageCount);
+            const start = (state.page - 1) * size;
+
+            rows.forEach(row => row.classList.add('off-page'));
+            visible.slice(start, start + size).forEach(row => row.classList.remove('off-page'));
+
+            table.querySelectorAll('th[data-sort]').forEach(th => {
+                const active = th.dataset.sort === state.key;
+                th.classList.toggle('sorted', active);
+                th.setAttribute('aria-sort', active ? (state.dir === 'asc' ? 'ascending' : 'descending') : 'none');
+                th.querySelector('.sort-icon')?.remove();
+                const icon = !active ? 'bi-arrow-down-up' : (state.dir === 'asc' ? 'bi-sort-up' : 'bi-sort-down');
+                th.insertAdjacentHTML('beforeend', `<i class="bi ${icon} sort-icon"></i>`);
+            });
+
+            body.querySelector('.page-info').textContent = visible.length
+                ? `Showing ${start + 1}–${Math.min(start + size, visible.length)} of ${visible.length}`
+                : '';
+
+            // First, last, current ±1, with "…" for the gaps.
+            const pages = [...new Set([1, state.page - 1, state.page, state.page + 1, pageCount])]
+                .filter(p => p >= 1 && p <= pageCount).sort((x, y) => x - y);
+            const item = (label, target, { active = false, disabled = false } = {}) => `
+                <li class="page-item ${active ? 'active' : ''} ${disabled ? 'disabled' : ''}">
+                    <a class="page-link" href="#" data-page="${target}" ${active ? 'aria-current="page"' : ''}>${label}</a>
+                </li>`;
+            let html = item('<i class="bi bi-chevron-left"></i>', state.page - 1, { disabled: state.page <= 1 });
+            pages.forEach((p, idx) => {
+                if (idx && p - pages[idx - 1] > 1) html += item('…', 0, { disabled: true });
+                html += item(p, p, { active: p === state.page });
+            });
+            html += item('<i class="bi bi-chevron-right"></i>', state.page + 1, { disabled: state.page >= pageCount });
+            body.querySelector('.pager').innerHTML = pageCount > 1 ? html : '';
+        }
+
+        table.querySelector('.sort-headers').addEventListener('click', (e) => {
+            const th = e.target.closest('th[data-sort]');
+            if (!th) return;
+            if (th.dataset.sort === state.key) {
+                state.dir = state.dir === 'asc' ? 'desc' : 'asc';
+            } else {
+                state.key = th.dataset.sort;
+                state.numeric = th.hasAttribute('data-numeric');
+                // Numbers read best biggest first; text A→Z.
+                state.dir = state.numeric ? 'desc' : 'asc';
+            }
+            state.page = 1;
+            render();
+        });
+
+        pageSize.addEventListener('change', () => {
+            try { localStorage.setItem(PAGE_SIZE_KEY, pageSize.value); } catch (e) { /* private mode */ }
+            state.page = 1;
+            render();
+        });
+
+        body.querySelector('.pager').addEventListener('click', (e) => {
+            const link = e.target.closest('a[data-page]');
+            e.preventDefault();
+            if (!link || link.parentElement.classList.contains('disabled')) return;
+            state.page = Number(link.dataset.page);
+            render();
+        });
+
+        return { render, resetPage: () => { state.page = 1; } };
+    }
+
+    const accountTables = [...document.querySelectorAll('.account-table')].map(setupAccountTable);
+
     // Remember the "show accounts with no transactions" switch in this browser.
     (function () {
         const toggle = document.getElementById('showEmpty');
-        if (!toggle) return;
-        const list = document.getElementById('bankList');
-        const apply = () => list.classList.toggle('show-empty', toggle.checked);
+        const apply = () => {
+            if (toggle) bankList.classList.toggle('show-empty', toggle.checked);
+            accountTables.forEach(t => { t.resetPage(); t.render(); });
+        };
 
-        try { toggle.checked = localStorage.getItem('plaid-show-empty-accounts') === '1'; } catch (e) { /* private mode */ }
+        if (toggle) {
+            try { toggle.checked = localStorage.getItem('plaid-show-empty-accounts') === '1'; } catch (e) { /* private mode */ }
+            toggle.addEventListener('change', () => {
+                apply();
+                try { localStorage.setItem('plaid-show-empty-accounts', toggle.checked ? '1' : '0'); } catch (e) { /* private mode */ }
+            });
+        }
         apply();
-
-        toggle.addEventListener('change', () => {
-            apply();
-            try { localStorage.setItem('plaid-show-empty-accounts', toggle.checked ? '1' : '0'); } catch (e) { /* private mode */ }
-        });
     })();
 </script>
 @endpush
